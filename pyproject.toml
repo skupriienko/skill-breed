@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skill-breed"
+version = "1.0.0"
+description = "Biomimetic Interspecific Cross-Breeding Engine for AI Agent Skills"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Serhii Kupriienko", email = "serhii@kupriienko.com" }
+]
+keywords = [
+    "ai-agents",
+    "agent-skills",
+    "cross-breeding",
+    "heterosis",
+    "interspecific-crossing",
+    "genetic-synthesis",
+    "fsm",
+    "skill-orchestration"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0.0"
+]
+
+[project.scripts]
+skill-breed = "skill_breed.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/skupriienko/skill-breed"
+Repository = "https://github.com/skupriienko/skill-breed.git"
+Issues = "https://github.com/skupriienko/skill-breed/issues"

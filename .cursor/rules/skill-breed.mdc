@@ -1,0 +1,5 @@
+---
+description: Skill Breed Invariant
+globs: *skill*/**
+---
+Execute skill-breed when combining skills.
