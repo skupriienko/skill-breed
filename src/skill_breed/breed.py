@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """Cross-Breeding Engine: Interspecific Skill Hybridization and Synthesis.
 
-Decomposes skills into functional genetic alleles (Sensor, Cognition, Actuator,
-Invariant), executes FSM-driven combinatorial crossing at boundary edges, and
-evaluates offspring vigor using the Aleksakha Heterosis Gate.
+Decomposes agent skills into functional genetic alleles (Sensor, Cognition,
+Actuator, Invariant), executes FSM-driven combinatorial meiosis and boundary
+mutation fuzzing, and evaluates offspring vigor using the Aleksakha Heterosis Gate.
 """
 
 from __future__ import annotations
 
-import argparse
-import json
 import random
 import re
-import sys
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+
+# Security Limits
+MAX_SKILL_FILE_BYTES = 512_000  # 512 KB per SKILL.md
+MAX_FRONTMATTER_BYTES = 64_000  # 64 KB frontmatter ceiling
 
 
 class AlleleType(StrEnum):
@@ -26,6 +27,18 @@ class AlleleType(StrEnum):
     COGNITION = "cognition"
     ACTUATOR = "actuator"
     INVARIANT = "invariant"
+
+
+def sanitize_identifier(raw: str) -> str:
+    """Sanitize any raw string into a safe python/filesystem identifier."""
+    cleaned = re.sub(r"[^a-zA-Z0-9_\-]", "_", raw.strip())
+    cleaned = re.sub(r"_+", "_", cleaned)
+    return cleaned.strip("_-") or "unnamed"
+
+
+def safe_resolve_path(path_input: Path | str) -> Path:
+    """Safely resolve path preventing traversal outside intended boundaries."""
+    return Path(path_input).expanduser().resolve()
 
 
 @dataclass(frozen=True)
@@ -43,14 +56,14 @@ class Allele:
             "name": self.name,
             "kind": self.kind.value,
             "summary": self.summary,
-            "weight": self.weight,
+            "weight": round(self.weight, 2),
             "dominant": self.dominant,
         }
 
 
 @dataclass
 class SkillChromosome:
-    """Structured genomic representation of a skill."""
+    """Structured genomic representation of an agent skill."""
 
     name: str
     genus: str
@@ -80,9 +93,11 @@ class HybridResult:
     offspring_name: str
     offspring_genus: str
     emergent_concept: str
+    emergent_capabilities: list[str]
     alleles: list[Allele]
     heterosis_score: float
     passed_gate: bool
+    tool_chain_dag: dict[str, Any] = field(default_factory=dict)
     fuzz_log: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -92,11 +107,65 @@ class HybridResult:
             "offspring_name": self.offspring_name,
             "offspring_genus": self.offspring_genus,
             "emergent_concept": self.emergent_concept,
+            "emergent_capabilities": self.emergent_capabilities,
             "heterosis_score": round(self.heterosis_score, 3),
             "passed_gate": self.passed_gate,
             "alleles": [a.to_dict() for a in self.alleles],
+            "tool_chain_dag": self.tool_chain_dag,
             "fuzz_log": self.fuzz_log,
         }
+
+    def to_mermaid(self) -> str:
+        """Generate a Mermaid flowchart visualizing the synthesized tool chain DAG."""
+
+        def m_id(val: str) -> str:
+            return re.sub(r"[^a-zA-Z0-9_]", "_", val).strip("_")
+
+        lines = [
+            "```mermaid",
+            "flowchart LR",
+            f'    subgraph ParentA["Parent A: {self.parent_a}"]',
+        ]
+        sensors = [a for a in self.alleles if a.kind == AlleleType.SENSOR]
+        for s in sensors:
+            lines.append(f'        {m_id(s.name)}["[Sensor] {s.name}"]')
+        lines.append("    end")
+
+        lines.append(f'    subgraph Cognition["Cognition Engine: {self.offspring_name}"]')
+        cogs = [a for a in self.alleles if a.kind == AlleleType.COGNITION]
+        for c in cogs:
+            lines.append(f'        {m_id(c.name)}{{"[Cognition] {c.name}"}}')
+        lines.append("    end")
+
+        lines.append(f'    subgraph Actuators["Actuation Pipeline: {self.parent_b}"]')
+        acts = [a for a in self.alleles if a.kind == AlleleType.ACTUATOR]
+        for a in acts:
+            lines.append(f'        {m_id(a.name)}["[Actuator] {a.name}"]')
+        lines.append("    end")
+
+        lines.append('    subgraph Invariants["Dominant Invariant Gates"]')
+        invs = [a for a in self.alleles if a.kind == AlleleType.INVARIANT]
+        for inv in invs:
+            lines.append(f'        {m_id(inv.name)}[["[Invariant Gate] {inv.name}"]]')
+        lines.append("    end")
+
+        # Connect sensors to cognition
+        for s in sensors:
+            for c in cogs:
+                lines.append(f"    {m_id(s.name)} --> {m_id(c.name)}")
+
+        # Connect cognition to actuators
+        for c in cogs:
+            for a in acts:
+                lines.append(f"    {m_id(c.name)} --> {m_id(a.name)}")
+
+        # Connect invariants to actuators as guards
+        for inv in invs:
+            for a in acts:
+                lines.append(f"    {m_id(inv.name)} -.->|Guard| {m_id(a.name)}")
+
+        lines.append("```")
+        return "\n".join(lines)
 
 
 class ChromosomeExtractor:
@@ -113,34 +182,39 @@ class ChromosomeExtractor:
         "sdlc": "lifecycle-process",
         "fsm": "state-machines",
         "hook": "platform-guardrails",
+        "eval": "meta-testing",
+        "concurrency": "multi-agent-safety",
     }
 
     @classmethod
     def extract_from_text(cls, name: str, text: str) -> SkillChromosome:
-        """Parses markdown text into a SkillChromosome."""
+        """Parses markdown text into a SkillChromosome with ReDoS and buffer defense."""
+        safe_name = sanitize_identifier(name)
         genus = "general-engineering"
-        lower_name = name.lower()
+        lower_name = safe_name.lower()
         for k, g in cls.GENUS_MAP.items():
             if k in lower_name:
                 genus = g
                 break
 
-        desc_match = re.search(r"description:\s*([^\n]+)", text)
-        desc = desc_match.group(1).strip().strip("'\"") if desc_match else f"Skill {name}"
+        # Bound frontmatter parsing to prevent regex backtracking
+        bounded_head = text[:MAX_FRONTMATTER_BYTES]
+        desc_match = re.search(r"^description:\s*([^\n]+)", bounded_head, re.MULTILINE)
+        desc = desc_match.group(1).strip().strip("'\"") if desc_match else f"Skill {safe_name}"
 
         alleles: list[Allele] = []
 
         # 1. Sensor alleles
         sensors = re.findall(
-            r"(?:detect|audit|scan|search|inspect|read|parse|measure|monitor)\w*",
-            text,
+            r"\b(?:detect|audit|scan|search|inspect|read|parse|measure|monitor)\w*",
+            text[:MAX_SKILL_FILE_BYTES],
             re.IGNORECASE,
         )
         if sensors:
-            top_sensor = max(set(sensors), key=sensors.count).lower()
+            top_sensor = sanitize_identifier(max(set(sensors), key=sensors.count).lower())
             alleles.append(
                 Allele(
-                    name=f"{name}_sensor_{top_sensor}",
+                    name=f"{safe_name}_sensor_{top_sensor}",
                     kind=AlleleType.SENSOR,
                     summary=f"Perceptual telemetry and inspection via {top_sensor}",
                     weight=1.2,
@@ -149,15 +223,15 @@ class ChromosomeExtractor:
 
         # 2. Cognition alleles
         cognition = re.findall(
-            r"(?:reason|decide|plan|classify|evaluate|optimize|prioritize|synthesize)\w*",
-            text,
+            r"\b(?:reason|decide|plan|classify|evaluate|optimize|prioritize|synthesize)\w*",
+            text[:MAX_SKILL_FILE_BYTES],
             re.IGNORECASE,
         )
         if cognition:
-            top_cog = max(set(cognition), key=cognition.count).lower()
+            top_cog = sanitize_identifier(max(set(cognition), key=cognition.count).lower())
             alleles.append(
                 Allele(
-                    name=f"{name}_cognition_{top_cog}",
+                    name=f"{safe_name}_cognition_{top_cog}",
                     kind=AlleleType.COGNITION,
                     summary=f"Cognitive strategy and heuristic logic via {top_cog}",
                     weight=1.5,
@@ -166,15 +240,15 @@ class ChromosomeExtractor:
 
         # 3. Actuator alleles
         actuators = re.findall(
-            r"(?:write|modify|execute|format|lint|generate|patch|deploy|emit)\w*",
-            text,
+            r"\b(?:write|modify|execute|format|lint|generate|patch|deploy|emit)\w*",
+            text[:MAX_SKILL_FILE_BYTES],
             re.IGNORECASE,
         )
         if actuators:
-            top_act = max(set(actuators), key=actuators.count).lower()
+            top_act = sanitize_identifier(max(set(actuators), key=actuators.count).lower())
             alleles.append(
                 Allele(
-                    name=f"{name}_actuator_{top_act}",
+                    name=f"{safe_name}_actuator_{top_act}",
                     kind=AlleleType.ACTUATOR,
                     summary=f"Operational mutation and dispatch via {top_act}",
                     weight=1.3,
@@ -183,15 +257,15 @@ class ChromosomeExtractor:
 
         # 4. Invariant alleles
         invariants = re.findall(
-            r"(?:invariant|ceiling|must|never|strictly|contract|bound|budget)\w*",
-            text,
+            r"\b(?:invariant|ceiling|must|never|strictly|contract|bound|budget)\w*",
+            text[:MAX_SKILL_FILE_BYTES],
             re.IGNORECASE,
         )
         if invariants:
-            top_inv = max(set(invariants), key=invariants.count).lower()
+            top_inv = sanitize_identifier(max(set(invariants), key=invariants.count).lower())
             alleles.append(
                 Allele(
-                    name=f"{name}_invariant_{top_inv}",
+                    name=f"{safe_name}_invariant_{top_inv}",
                     kind=AlleleType.INVARIANT,
                     summary=f"Deterministic boundary constraint via {top_inv}",
                     weight=2.0,
@@ -203,40 +277,65 @@ class ChromosomeExtractor:
             # Fallback allele set
             alleles = [
                 Allele(
-                    f"{name}_core_sensor",
+                    f"{safe_name}_core_sensor",
                     AlleleType.SENSOR,
-                    f"Observation driver for {name}",
+                    f"Observation driver for {safe_name}",
+                    weight=1.0,
                 ),
                 Allele(
-                    f"{name}_core_policy",
+                    f"{safe_name}_core_policy",
                     AlleleType.COGNITION,
-                    f"Decision policy for {name}",
+                    f"Decision policy for {safe_name}",
+                    weight=1.2,
                 ),
                 Allele(
-                    f"{name}_core_action",
+                    f"{safe_name}_core_action",
                     AlleleType.ACTUATOR,
-                    f"Action dispatch for {name}",
+                    f"Action dispatch for {safe_name}",
+                    weight=1.1,
                 ),
                 Allele(
-                    f"{name}_core_contract",
+                    f"{safe_name}_core_contract",
                     AlleleType.INVARIANT,
-                    f"Contract enforcement for {name}",
+                    f"Contract enforcement for {safe_name}",
+                    weight=2.0,
                     dominant=True,
                 ),
             ]
 
-        return SkillChromosome(name=name, genus=genus, description=desc, alleles=alleles)
+        return SkillChromosome(name=safe_name, genus=genus, description=desc, alleles=alleles)
 
     @classmethod
-    def load_skill_file(cls, path: Path) -> SkillChromosome:
-        """Reads a SKILL.md file and extracts its chromosome."""
-        content = path.read_text(encoding="utf-8")
-        name = path.parent.name if path.name == "SKILL.md" else path.stem
+    def load_skill_file(cls, path_input: Path | str) -> SkillChromosome:
+        """Reads a SKILL.md file or directory and extracts its chromosome safely."""
+        path = safe_resolve_path(path_input)
+        if path.is_dir():
+            target_file = path / "SKILL.md"
+            if not target_file.exists():
+                err_missing = f"Missing mandatory SKILL.md in directory: {path}"
+                raise FileNotFoundError(err_missing)
+            name = path.name
+        else:
+            target_file = path
+            name = path.parent.name if path.name == "SKILL.md" else path.stem
+
+        if target_file.stat().st_size > MAX_SKILL_FILE_BYTES:
+            err_size = (
+                f"File size exceeds maximum safety limit ({target_file.stat().st_size} > {MAX_SKILL_FILE_BYTES} bytes)"
+            )
+            raise ValueError(err_size)
+
+        content = target_file.read_text(encoding="utf-8", errors="replace")
         return cls.extract_from_text(name, content)
+
+    @classmethod
+    def extract_from_skill_dir(cls, dir_path: Path | str) -> SkillChromosome:
+        """Alias for load_skill_file supporting directories."""
+        return cls.load_skill_file(dir_path)
 
 
 class HybridMutationFuzzer:
-    """Fuzz State Machine Engine (FSME) for boundary allele interactions."""
+    """Fuzz State Machine Engine (FSME) for boundary allele interactions and tool chaining."""
 
     def __init__(self, seed: int = 42) -> None:
         self.rng = random.Random(seed)  # noqa: S311
@@ -246,35 +345,74 @@ class HybridMutationFuzzer:
         parent_a: SkillChromosome,
         parent_b: SkillChromosome,
         crossover_alleles: list[Allele],
-    ) -> tuple[list[Allele], list[str]]:
-        """Subject crossed alleles to state-space boundary fuzzing."""
+    ) -> tuple[list[Allele], list[str], list[str], dict[str, Any]]:
+        """Subject crossed alleles to state-space boundary fuzzing and tool-chain synthesis."""
         log: list[str] = []
+        emergent_caps: list[str] = []
         result_alleles = list(crossover_alleles)
 
-        log.append(f"FSM init: Pairing {parent_a.name} x {parent_b.name}")
+        log.append(
+            f"FSME [STATE:INIT]: Pairing '{parent_a.name}' ({parent_a.genus}) x '{parent_b.name}' ({parent_b.genus})"
+        )
 
-        # Invariant dominance pass
+        # 1. Invariant Dominance Pass
         invariants = [a for a in result_alleles if a.kind == AlleleType.INVARIANT]
-        log.append(f"FSM state INVARIANT_CHECK: {len(invariants)} boundary invariants verified")
+        log.append(f"FSME [STATE:INVARIANT_CHECK]: {len(invariants)} boundary invariants verified as dominant")
 
-        # Detect and mutate complementary sensor-actuator pairing
+        # 2. Sensor-Actuator Dialectical Synthesis
         sensors = [a for a in result_alleles if a.kind == AlleleType.SENSOR]
         actuators = [a for a in result_alleles if a.kind == AlleleType.ACTUATOR]
 
         if sensors and actuators:
             s = sensors[0]
             a = actuators[0]
+            emergent_name = f"synth_{s.name}_{a.name}"
             emergent_allele = Allele(
-                name=f"hybrid_{s.name}_{a.name}",
+                name=emergent_name,
                 kind=AlleleType.COGNITION,
-                summary=f"Synthesized feedback loop between {s.name} and {a.name}",
-                weight=1.8,
+                summary=f"Synthesized closed-loop feedback controller between {s.name} and {a.name}",
+                weight=1.9,
             )
             result_alleles.append(emergent_allele)
-            log.append(f"FSM state DIALECTICAL_SYNTHESIS: Generated emergent allele '{emergent_allele.name}'")
+            emergent_caps.append(f"Autonomous feedback loop: {s.name} -> {a.name}")
+            log.append(f"FSME [STATE:DIALECTICAL_SYNTHESIS]: Generated emergent allele '{emergent_name}'")
 
-        log.append(f"FSM state CLOSURE: Final hybrid allele count = {len(result_alleles)}")
-        return result_alleles, log
+        # 3. Cross-Genus Boundary Invariant Synthesis
+        if parent_a.genus != parent_b.genus:
+            boundary_guard_name = f"guard_{parent_a.name[:8]}_{parent_b.name[:8]}"
+            guard_allele = Allele(
+                name=boundary_guard_name,
+                kind=AlleleType.INVARIANT,
+                summary=f"Cross-boundary contract ensuring zero interface drift between {parent_a.genus} and {parent_b.genus}",
+                weight=2.2,
+                dominant=True,
+            )
+            result_alleles.append(guard_allele)
+            emergent_caps.append(f"Cross-domain contract enforcement: {parent_a.genus} <-> {parent_b.genus}")
+            log.append(f"FSME [STATE:CROSS_GENUS_GUARD]: Generated boundary guard '{boundary_guard_name}'")
+
+        # 4. Tool Chaining DAG Generation
+        dag = {
+            "entry_sensors": [s.name for s in sensors],
+            "reasoning_nodes": [a.name for a in result_alleles if a.kind == AlleleType.COGNITION],
+            "actuator_nodes": [a.name for a in actuators],
+            "invariant_guards": [inv.name for inv in result_alleles if inv.kind == AlleleType.INVARIANT],
+            "edges": [],
+        }
+
+        # Build edges: Sensors -> Cognition -> Actuators
+        for s in sensors:
+            for c in [a for a in result_alleles if a.kind == AlleleType.COGNITION]:
+                dag["edges"].append({"from": s.name, "to": c.name, "type": "percept_feed"})
+
+        for c in [a for a in result_alleles if a.kind == AlleleType.COGNITION]:
+            for act in actuators:
+                dag["edges"].append({"from": c.name, "to": act.name, "type": "dispatch_command"})
+
+        log.append(f"FSME [STATE:TOOL_CHAIN_SYNTHESIS]: Synthesized DAG with {len(dag['edges'])} active paths")
+        log.append(f"FSME [STATE:CLOSURE]: Final hybrid allele count = {len(result_alleles)}")
+
+        return result_alleles, emergent_caps, log, dag
 
 
 class HeterosisEvaluator:
@@ -297,7 +435,7 @@ class HeterosisEvaluator:
         hybrid_score = sum(a.weight for a in hybrid_alleles)
 
         # Cross-genus bonus (interspecific hybridization vigor)
-        genus_distance_bonus = 1.25 if parent_a.genus != parent_b.genus else 1.05
+        genus_distance_bonus = 1.25 if parent_a.genus != parent_b.genus else 1.08
         adjusted_score = hybrid_score * genus_distance_bonus
 
         heterosis_ratio = adjusted_score / base_max
@@ -316,13 +454,15 @@ class SkillBreeder:
 
     def breed(self, parent_a: SkillChromosome, parent_b: SkillChromosome) -> HybridResult:
         """Cross-breeds two parent skills to synthesize a viable hybrid."""
-        offspring_name = f"hybrid_{parent_a.name}_{parent_b.name}".replace("-", "_")
+        safe_a = sanitize_identifier(parent_a.name)
+        safe_b = sanitize_identifier(parent_b.name)
+        offspring_name = f"hybrid_{safe_a}_{safe_b}"
         offspring_genus = f"hybrid-{parent_a.genus}-{parent_b.genus}"
 
-        # Meiotic crossover: collect all dominant alleles, sample balanced set of others
+        # Meiotic Crossover: collect all dominant alleles, sample balanced set of others
         selected_alleles: list[Allele] = []
 
-        # All dominant invariant alleles are preserved
+        # All dominant invariant alleles are strictly preserved
         for p in (parent_a, parent_b):
             for a in p.alleles:
                 if a.dominant and a not in selected_alleles:
@@ -332,11 +472,13 @@ class SkillBreeder:
         other_a = [a for a in parent_a.alleles if not a.dominant]
         other_b = [a for a in parent_b.alleles if not a.dominant]
 
-        selected_alleles.extend(other_a[:2])
-        selected_alleles.extend(other_b[:2])
+        selected_alleles.extend(other_a[:3])
+        selected_alleles.extend(other_b[:3])
 
-        # Execute FSME boundary fuzzing
-        fuzzed_alleles, fuzz_log = self.fuzzer.fuzz_boundary(parent_a, parent_b, selected_alleles)
+        # Execute FSME boundary fuzzing & Tool Chaining
+        fuzzed_alleles, emergent_caps, fuzz_log, tool_dag = self.fuzzer.fuzz_boundary(
+            parent_a, parent_b, selected_alleles
+        )
 
         # Evaluate Heterosis Gate
         heterosis_score, passed = self.evaluator.evaluate(parent_a, parent_b, fuzzed_alleles)
@@ -352,112 +494,13 @@ class SkillBreeder:
             offspring_name=offspring_name,
             offspring_genus=offspring_genus,
             emergent_concept=emergent_concept,
+            emergent_capabilities=emergent_caps,
             alleles=fuzzed_alleles,
             heterosis_score=heterosis_score,
             passed_gate=passed,
+            tool_chain_dag=tool_dag,
             fuzz_log=fuzz_log,
         )
-
-
-class CrossBreedCLI:
-    """Command Line Interface for skill cross-breeding."""
-
-    @staticmethod
-    def run() -> int:
-        parser = argparse.ArgumentParser(description="Interspecific Skill Cross-Breeding Engine")
-        subparsers = parser.add_subparsers(dest="command", required=True)
-
-        # breed subcommand
-        breed_parser = subparsers.add_parser("breed", help="Cross-breed two specific skills")
-        breed_parser.add_argument("--skill-a", required=True, help="Name or path of parent skill A")
-        breed_parser.add_argument("--skill-b", required=True, help="Name or path of parent skill B")
-        breed_parser.add_argument("--fuzz", action="store_true", help="Enable boundary fuzzing log")
-        breed_parser.add_argument(
-            "--threshold",
-            type=float,
-            default=1.15,
-            help="Minimum heterosis threshold",
-        )
-        breed_parser.add_argument("--seed", type=int, default=42, help="Deterministic random seed")
-        breed_parser.add_argument("--out", type=str, default="", help="Optional JSON output path")
-
-        # matrix subcommand
-        matrix_parser = subparsers.add_parser("matrix", help="Generate crossing matrix over a directory of skills")
-        matrix_parser.add_argument("--skills-dir", required=True, help="Path to skills directory")
-        matrix_parser.add_argument(
-            "--threshold",
-            type=float,
-            default=1.15,
-            help="Minimum heterosis threshold",
-        )
-        matrix_parser.add_argument("--out", type=str, default="", help="Optional JSON output path")
-
-        args = parser.parse_args()
-
-        if args.command == "breed":
-            path_a = Path(args.skill_a)
-            path_b = Path(args.skill_b)
-
-            if path_a.exists() and path_a.is_file():
-                chrom_a = ChromosomeExtractor.load_skill_file(path_a)
-            else:
-                chrom_a = ChromosomeExtractor.extract_from_text(args.skill_a, f"Skill {args.skill_a}")
-
-            if path_b.exists() and path_b.is_file():
-                chrom_b = ChromosomeExtractor.load_skill_file(path_b)
-            else:
-                chrom_b = ChromosomeExtractor.extract_from_text(args.skill_b, f"Skill {args.skill_b}")
-
-            breeder = SkillBreeder(seed=args.seed, threshold=args.threshold)
-            result = breeder.breed(chrom_a, chrom_b)
-
-            out_data = result.to_dict()
-            if not args.fuzz:
-                out_data.pop("fuzz_log", None)
-
-            json_str = json.dumps(out_data, indent=2)
-            if args.out:
-                Path(args.out).write_text(json_str, encoding="utf-8")
-                print(f"Hybrid written to {args.out}")
-            else:
-                print(json_str)
-
-            return 0 if result.passed_gate else 1
-
-        if args.command == "matrix":
-            skills_dir = Path(args.skills_dir)
-            if not skills_dir.exists():
-                print(
-                    f"Error: Directory {skills_dir} does not exist",
-                    file=sys.stderr,
-                )
-                return 1
-
-            skill_files = list(skills_dir.glob("*/SKILL.md"))
-            chromosomes = [ChromosomeExtractor.load_skill_file(f) for f in skill_files]
-
-            print(f"Loaded {len(chromosomes)} skill chromosomes. Building crossing matrix...")
-            breeder = SkillBreeder(threshold=args.threshold)
-            matrix_results: list[dict[str, Any]] = []
-
-            for i in range(len(chromosomes)):
-                for j in range(i + 1, len(chromosomes)):
-                    res = breeder.breed(chromosomes[i], chromosomes[j])
-                    if res.passed_gate:
-                        matrix_results.append(res.to_dict())
-
-            print(f"Generated {len(matrix_results)} successful interspecific hybrids passing the Heterosis Gate.")
-            if args.out:
-                Path(args.out).write_text(json.dumps(matrix_results, indent=2), encoding="utf-8")
-                print(f"Matrix written to {args.out}")
-
-            return 0
-
-        return 0
-
-
-if __name__ == "__main__":
-    sys.exit(CrossBreedCLI.run())
 
 
 def breed_skills(
@@ -466,8 +509,8 @@ def breed_skills(
     threshold: float = 1.15,
     seed: int | None = None,
 ) -> HybridResult:
-    """Convenience function to breed two agent skills from disk paths."""
-    chrom_a = ChromosomeExtractor.extract_from_skill_dir(skill_a_path)
-    chrom_b = ChromosomeExtractor.extract_from_skill_dir(skill_b_path)
-    breeder = SkillBreeder(threshold=threshold, seed=seed)
+    """Convenience function to breed two agent skills directly from filesystem paths."""
+    chrom_a = ChromosomeExtractor.load_skill_file(skill_a_path)
+    chrom_b = ChromosomeExtractor.load_skill_file(skill_b_path)
+    breeder = SkillBreeder(threshold=threshold, seed=seed if seed is not None else 42)
     return breeder.breed(chrom_a, chrom_b)

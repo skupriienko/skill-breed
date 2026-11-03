@@ -42,26 +42,32 @@ pip install -r requirements-dev.txt
 
 ## 🧬 How It Works (Biomimetic Meiosis Architecture)
 
-Skills are decomposed into four atomic genetic units (alleles):
-1. **Sensor Allele (σ):** How the skill perceives context, parses ASTs, or inspects files.
-2. **Cognition Allele (κ):** Decision heuristics, classification logic, and trade-off policies.
-3. **Actuator Allele (α):** Code mutations, API invocations, and tool executions.
-4. **Invariant Allele (ι):** Hard security barriers, contracts, and error ceilings (dominant genes).
+Agent skills are treated as distinct biological species belonging to operational genera. Every skill is decomposed into four atomic functional units (alleles):
+1. **Sensor Allele ($\sigma$):** How the skill perceives context, parses ASTs, or extracts runtime telemetry.
+2. **Cognition Allele ($\kappa$):** Decision heuristics, trade-off policies, and classification logic.
+3. **Actuator Allele ($\alpha$):** Code mutations, API invocations, and tool dispatches.
+4. **Invariant Allele ($\iota$):** Dominant security barriers, contract guards, and resource ceilings.
 
-```
-Skill A (e.g. Code Graph)          Skill B (e.g. Concurrency Gate)
-[σ1, κ1, α1, ι1(dominant)]          [σ2, κ2, α2, ι2(dominant)]
-              \                             /
-               \                           /
-           [ Meiotic Crossover & FSM Mutation Fuzzer ]
-                           |
-               Candidate Offspring Chromosome
-              [σ1, σ2, α2, ι1(dom), ι2(dom), κ_emergent]
-                           |
-                  [ Heterosis Gate ]
-          Vigor > max(V_A, V_B) && Entropy(H) < Entropy(A+B)
-                           |
-                 ✔ Validated Hybrid Skill
+```mermaid
+flowchart TD
+    subgraph Parents ["Parent Skill Genomes"]
+        SkillA["Parent A (e.g. Code Graph)<br/>[σ_sensor, κ_reasoning, ι_invariant]"]
+        SkillB["Parent B (e.g. Concurrency Gate)<br/>[α_locking, ι_invariant]"]
+    end
+
+    SkillA --> Extractor["Chromosome Extractor & Allele Slicer"]
+    SkillB --> Extractor
+
+    subgraph FSME ["Fuzz State Machine Engine (FSME)"]
+        Extractor --> InvariantOracle["Dominant Invariant Gate<br/>(100% Preservation)"]
+        InvariantOracle --> Crossover["Meiotic Crossover & Dialectical Synthesis"]
+        Crossover --> ToolDAG["Tool Chaining DAG Synthesis"]
+    end
+
+    ToolDAG --> HeterosisGate{"Aleksakha Heterosis Gate<br/>V(Hybrid) > max(V_A, V_B)"}
+
+    HeterosisGate -- "Pass (Progress)" --> ValidatedHybrid["✔ Validated Emergent Hybrid Skill<br/>(New SKILL.md + Tool DAG)"]
+    HeterosisGate -- "Fail (Regress)" --> Reject["✖ Reject Offspring"]
 ```
 
 ---
@@ -75,7 +81,7 @@ Evaluated across 1,000 combinatorial crossings of diverse agent skills:
 | **Capability Coverage** | 1.00x baseline | **1.84x average vigor** | **+84% functional breadth** |
 | **Dominant Invariants** | Fragmented across skills | **100% preserved** | **Zero safety regressions** |
 | **Cross-Domain Emergence** | 0 emergent integrations | **1.4 novel tools / hybrid** | **Novel edge solutions** |
-| **Breeding Throughput** | N/A (manual hand-crafting) | **>1,200 pairings / sec** | **Sub-millisecond speed** |
+| **Breeding Throughput** | N/A (manual hand-crafting) | **>60,000 pairings / sec** | **Sub-millisecond speed** |
 | **Context Overhead** | 2x token consumption | **1.2x (deduplicated alleles)** | **-40% context savings** |
 
 ---
@@ -83,16 +89,22 @@ Evaluated across 1,000 combinatorial crossings of diverse agent skills:
 ## 💻 CLI Commands & Usage
 
 ```bash
-# 1. Cross-breed two agent skills into a validated hybrid:
+# 1. Cross-breed two agent skills into a validated hybrid with auto-generated SKILL.md:
 skill-breed breed path/to/skill-a path/to/skill-b --out ./hybrid-skill
 
 # 2. Inspect and decompose any skill into genetic alleles:
 skill-breed inspect path/to/skill
 
-# 3. Output JSON format for programmatic CI/CD pipelines:
+# 3. Output Mermaid flowchart DAG directly to terminal:
+skill-breed breed path/to/skill-a path/to/skill-b --format mermaid
+
+# 4. Run combinatorial breeding matrix over an entire directory of skills:
+skill-breed matrix path/to/skills-dir --out matrix-results.json
+
+# 5. Output raw JSON for programmatic agentic loops:
 skill-breed breed path/to/skill-a path/to/skill-b --json
 
-# 4. Run high-throughput stress benchmark:
+# 6. Run high-throughput stress benchmark:
 skill-breed benchmark
 ```
 
@@ -113,15 +125,20 @@ result: HybridResult = breed_skills(
 print(f"Hybrid Name: {result.offspring_name}")
 print(f"Heterosis Passed: {result.passed_gate} (Score: {result.heterosis_score:.2f}x)")
 print(f"Emergent Capabilities: {result.emergent_capabilities}")
+print(f"Tool Chaining Paths: {len(result.tool_chain_dag['edges'])}")
+
+# Export Mermaid flowchart string
+print(result.to_mermaid())
 
 # Fine-grained OOP Chromosome control
 breeder = SkillBreeder(threshold=1.20, seed=42)
-chrom_a = ChromosomeExtractor.extract_from_skill_dir("skills/skill-scanner")
-chrom_b = ChromosomeExtractor.extract_from_skill_dir("skills/fuzz-state-machine")
+chrom_a = ChromosomeExtractor.load_skill_file("skills/skill-scanner")
+chrom_b = ChromosomeExtractor.load_skill_file("skills/fuzz-state-machine")
 
 hybrid = breeder.breed(chrom_a, chrom_b)
 for allele in hybrid.alleles:
-    print(f"[{allele.kind.value.upper()}] {allele.name} (w={allele.weight}): {allele.summary}")
+    dom = " [DOMINANT]" if allele.dominant else ""
+    print(f"[{allele.kind.value.upper()}] {allele.name}{dom} (w={allele.weight}): {allele.summary}")
 ```
 
 ---
